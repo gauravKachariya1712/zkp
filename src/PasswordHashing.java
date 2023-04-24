@@ -5,16 +5,8 @@ import java.security.*;
 import java.util.Base64;
 import java.util.Random;
 import java.util.Scanner;
-//import org.bouncycastle.*;
-import org.bouncycastle.crypto.digests.SHA256Digest;
-import org.bouncycastle.crypto.generators.SCrypt;
-import java.security.spec.KeySpec;
 
 public class PasswordHashing {
-    private static final int SCRYPT_N = 16384;
-    private static final int SCRYPT_R = 8;
-    private static final int SCRYPT_P = 1;
-    private static final int SALT_LENGTH = 16;
 
     public static void main(String[] args) throws Exception {
         Console console = System.console();
@@ -37,52 +29,69 @@ public class PasswordHashing {
 //        KeyPair keyPair = generateRSAKeyPair();
 //        // Encrypt the message using the public key from the generated key pair
 //        byte[] encryptedMessage = async_enc(password, keyPair.getPublic());
-//        System.out.println("Encrypted Message: " + new String(encryptedMessage));
+//
+//        System.out.println("Encrypted Message: " + Base64.getEncoder().encodeToString(encryptedMessage));
 //        System.out.println("\nUsed Public key: " + keyPair.getPublic());
 //
 //        // Decrypt the message using the private key from the generated key pair
 //        String decryptedMessage = async_dec(encryptedMessage, keyPair.getPrivate());
-//
 //        System.out.println("\nDecrypted Message: " + decryptedMessage);
 //        System.out.println("Used Private key: " + keyPair.getPrivate());
 
-        // Step-4
-        byte[] salt = generateSalt();
-        byte[] encryptedPass = hash(scrypt(password.getBytes(), salt, 32));
-        byte[] challenge = generateSalt();
-        byte[] response = scrypt(password.getBytes(), challenge, 32);
-        boolean verified = verifyPassword(response, challenge, encryptedPass);
-
-        if (verified) {
-            System.out.println("Password verified");
-        } else {
-            System.out.println("Incorrect password");
-        }
+        // Step-4 ZKP
+        zkp(password);
     }
 
     //step-4
-    public static byte[] hash(byte[] message) {
-        SHA256Digest digest = new SHA256Digest();
-        byte[] output = new byte[digest.getDigestSize()];
-        digest.update(message, 0, message.length);
-        digest.doFinal(output, 0);
-        return output;
-    }
+    public static void zkp(String storedPassword){
+        try (Scanner scanner = new Scanner(System.in)) {
 
-    private static byte[] scrypt(byte[] password, byte[] salt, int dkLen) {
-        return SCrypt.generate(password, salt, SCRYPT_N, SCRYPT_R, SCRYPT_P, dkLen);
-    }
+            // Generate a key pair for the user
+            KeyPairGenerator keyGen = KeyPairGenerator.getInstance("EC");
+            SecureRandom random = new SecureRandom();
+            keyGen.initialize(256, random);
+            KeyPair keyPair = keyGen.generateKeyPair();
 
-    private static byte[] generateSalt() {
-        SecureRandom random = new SecureRandom();
-        byte[] salt = new byte[SALT_LENGTH];
-        random.nextBytes(salt);
-        return salt;
-    }
+            // Take input from the user to verify password
+            System.out.print("verify your password: ");
+            String password = scanner.nextLine();
 
-    private static boolean verifyPassword(byte[] password, byte[] salt, byte[] verification) {
-        byte[] expectedVerification = hash(scrypt(password, salt, 32));
-        return MessageDigest.isEqual(expectedVerification, verification);
+            // Compare the user input to the stored password
+            boolean passwordMatch = storedPassword.equals(password);
+
+            // Generate a challenge for the user to prove knowledge of the password
+            byte[] challenge = new byte[32];
+            random.nextBytes(challenge);
+
+            // Sign the challenge using the user's private key and password match
+            Signature signature = Signature.getInstance("SHA256withECDSA");
+            signature.initSign(keyPair.getPrivate());
+            signature.update(challenge);
+            signature.update((byte) (passwordMatch ? 1 : 0));
+            byte[] proof = signature.sign();
+
+            // Verify the proof using the user's public key, challenge, and password match
+            signature.initVerify(keyPair.getPublic());
+            signature.update(challenge);
+            signature.update((byte) (passwordMatch ? 1 : 0));
+            boolean verified = signature.verify(proof);
+
+            if (verified) {
+                if (passwordMatch) {
+                    System.out.println("Proof verified - password accepted!");
+                } else {
+                    System.out.println("Proof verified - password rejected!");
+                }
+            } else {
+                System.out.println("Proof not verified - password rejected!");
+            }
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        } catch (SignatureException e) {
+            throw new RuntimeException(e);
+        } catch (InvalidKeyException e) {
+            throw new RuntimeException(e);
+        }
     }
 
 
@@ -154,6 +163,4 @@ public class PasswordHashing {
         }
             System.out.println("Encrypted Password: " + generatedPassword);
     }
-
-
 }
